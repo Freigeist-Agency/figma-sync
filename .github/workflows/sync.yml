@@ -1,0 +1,348 @@
+name: sync
+
+on:
+  workflow_call:
+    inputs:
+      node_id:
+        type: string
+        required: false
+      change_message:
+        type: string
+        required: false
+      force:
+        type: boolean
+        default: false
+        required: false
+      wait_seconds:
+        type: number
+        default: 600
+        required: false
+      engine_ref:
+        type: string
+        default: v1
+        required: false
+    secrets:
+      FIGMA_TOKEN:
+        required: true
+      CLAUDE_CODE_OAUTH_TOKEN:
+        required: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    outputs:
+      due: ${{ steps.fetch.outputs.due }}
+      base: ${{ steps.fetch.outputs.base }}
+    steps:
+      - name: Checkout site
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Exclude internal paths
+        run: |
+          mkdir -p .git/info
+          echo '.figma-sync/work/' >> .git/info/exclude
+          echo '.figma-sync-engine/' >> .git/info/exclude
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Checkout engine
+        uses: actions/checkout@v4
+        with:
+          repository: Freigeist-Agency/figma-sync
+          ref: ${{ inputs.engine_ref }}
+          path: .figma-sync-engine
+
+      - name: Install engine dependencies
+        run: npm ci --prefix .figma-sync-engine
+
+      - name: Wait for batching
+        if: inputs.wait_seconds > 0
+        run: sleep ${{ inputs.wait_seconds }}
+
+      - name: Fetch due sections
+        id: fetch
+        env:
+          FIGMA_TOKEN: ${{ secrets.FIGMA_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN || github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          # Passed through env, never ${{ }} in the script: the change message is free text from Figma.
+          NODE_ID: ${{ inputs.node_id }}
+          CHANGE_MESSAGE: ${{ inputs.change_message }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          args=()
+          if [ -n "$NODE_ID" ]; then
+            args+=(--node-id "$NODE_ID")
+          fi
+          if [ -n "$CHANGE_MESSAGE" ]; then
+            args+=(--change-message "$CHANGE_MESSAGE")
+          fi
+          if [ "$FORCE" = "true" ]; then
+            args+=(--force)
+          fi
+          node .figma-sync-engine/bin/figma-sync.js fetch "${args[@]}"
+
+      - name: Create work branch
+        if: steps.fetch.outputs.due != '[]' && steps.fetch.outputs.due != ''
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "figma-sync/work-${{ github.run_id }}" "${{ steps.fetch.outputs.base }}"
+          git push origin "figma-sync/work-${{ github.run_id }}"
+
+      - name: Upload work artifact
+        if: steps.fetch.outputs.due != '[]' && steps.fetch.outputs.due != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: work
+          path: .figma-sync/work/
+          include-hidden-files: true
+
+  section:
+    needs: fetch
+    if: needs.fetch.outputs.due != '[]' && needs.fetch.outputs.due != ''
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 1
+      fail-fast: true
+      matrix:
+        section: ${{ fromJSON(needs.fetch.outputs.due) }}
+    steps:
+      - name: Checkout work branch
+        uses: actions/checkout@v4
+        with:
+          ref: figma-sync/work-${{ github.run_id }}
+          fetch-depth: 0
+
+      - name: Exclude internal paths
+        run: |
+          mkdir -p .git/info
+          echo '.figma-sync/work/' >> .git/info/exclude
+          echo '.figma-sync-engine/' >> .git/info/exclude
+
+      - name: Download work artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: work
+          path: .figma-sync/work
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Checkout engine
+        uses: actions/checkout@v4
+        with:
+          repository: Freigeist-Agency/figma-sync
+          ref: ${{ inputs.engine_ref }}
+          path: .figma-sync-engine
+
+      - name: Install engine dependencies
+        run: npm ci --prefix .figma-sync-engine
+
+      - name: Generate section prompt
+        id: prompt
+        env:
+          SECTION: ${{ matrix.section }}
+        run: |
+          echo "base=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          prompt_file=$(node .figma-sync-engine/bin/figma-sync.js prompt --section "$SECTION")
+          echo "prompt_file=$prompt_file" >> "$GITHUB_OUTPUT"
+
+      - name: Load prompt content
+        id: read_prompt
+        run: |
+          prompt_content=$(cat "${{ steps.prompt.outputs.prompt_file }}")
+          EOF=$(dd if=/dev/urandom bs=15 count=1 status=none | base64)
+          echo "prompt<<$EOF" >> "$GITHUB_OUTPUT"
+          echo "$prompt_content" >> "$GITHUB_OUTPUT"
+          echo "$EOF" >> "$GITHUB_OUTPUT"
+
+      - name: Run Claude Code
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ github.token }}
+          prompt: ${{ steps.read_prompt.outputs.prompt }}
+          claude_args: |
+            --allowedTools "Read,Edit,Write,Glob,Grep,Bash(magick:*),Bash(identify:*)"
+
+      - name: Run guard
+        env:
+          FIGMA_TOKEN: ${{ secrets.FIGMA_TOKEN }}
+          SECTION: ${{ matrix.section }}
+        run: |
+          node .figma-sync-engine/bin/figma-sync.js guard \
+            --base "${{ steps.prompt.outputs.base }}" \
+            --section "$SECTION"
+
+      - name: Commit and push changes
+        env:
+          SECTION: ${{ matrix.section }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "figma-sync: $SECTION"
+            git push origin "figma-sync/work-${{ github.run_id }}"
+          fi
+
+      - name: Upload section report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: report-${{ matrix.section }}
+          path: .figma-sync/work/${{ matrix.section }}/report.md
+          if-no-files-found: ignore
+          include-hidden-files: true
+
+      - name: Comment on failure
+        if: failure()
+        env:
+          FIGMA_TOKEN: ${{ secrets.FIGMA_TOKEN }}
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            const map = JSON.parse(fs.readFileSync(".figma-sync/map.json", "utf8"));
+            const sec = (map.sections || []).find(s => s.name === "${{ matrix.section }}");
+            if (!sec || !sec.frames || !sec.frames[0]) process.exit(0);
+            const runUrl = "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}";
+            const body = JSON.stringify({
+              message: `Sync failed, see ${runUrl}`,
+              client_meta: { node_id: sec.frames[0], node_offset: { x: 0, y: 0 } }
+            });
+            fetch(`https://api.figma.com/v1/files/${map.fileKey}/comments`, {
+              method: "POST",
+              headers: { "X-Figma-Token": process.env.FIGMA_TOKEN, "Content-Type": "application/json" },
+              body
+            }).catch(() => {});
+          '
+
+  publish:
+    needs: [fetch, section]
+    if: always() && needs.fetch.result == 'success' && (needs.section.result == 'success' || needs.fetch.outputs.due == '[]')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout site
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Exclude internal paths
+        run: |
+          mkdir -p .git/info
+          echo '.figma-sync/work/' >> .git/info/exclude
+          echo '.figma-sync-engine/' >> .git/info/exclude
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Checkout engine
+        uses: actions/checkout@v4
+        with:
+          repository: Freigeist-Agency/figma-sync
+          ref: ${{ inputs.engine_ref }}
+          path: .figma-sync-engine
+
+      - name: Install engine dependencies
+        run: npm ci --prefix .figma-sync-engine
+
+      - name: Download work artifact
+        if: needs.fetch.outputs.due != '[]'
+        uses: actions/download-artifact@v4
+        with:
+          name: work
+          path: .figma-sync/work
+
+      - name: Download reports
+        if: needs.fetch.outputs.due != '[]'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: report-*
+          path: .figma-sync/work/reports
+
+      - name: Normalize report locations
+        if: needs.fetch.outputs.due != '[]'
+        run: |
+          for d in .figma-sync/work/reports/report-*; do
+            if [ -d "$d" ]; then
+              sec="${d##*/report-}"
+              mkdir -p ".figma-sync/work/reports/$sec"
+              mv "$d/report.md" ".figma-sync/work/reports/$sec/report.md" 2>/dev/null || true
+              rmdir "$d" 2>/dev/null || true
+            fi
+          done
+
+      - name: Merge squash work branch
+        if: needs.fetch.outputs.due != '[]'
+        run: |
+          git fetch origin "figma-sync/work-${{ github.run_id }}"
+          git merge --squash "origin/figma-sync/work-${{ github.run_id }}"
+
+      - name: Install Playwright browsers
+        if: needs.fetch.outputs.due != '[]'
+        run: cd .figma-sync-engine && npx playwright install --with-deps chromium
+
+      - name: Smoke check
+        if: needs.fetch.outputs.due != '[]'
+        run: node .figma-sync-engine/bin/figma-sync.js smoke --base HEAD
+
+      - name: Capture screenshots
+        if: needs.fetch.outputs.due != '[]'
+        run: node .figma-sync-engine/bin/figma-sync.js shots
+
+      - name: Prepare publish
+        if: needs.fetch.outputs.due != '[]'
+        id: prepare
+        env:
+          FIGMA_TOKEN: ${{ secrets.FIGMA_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+        run: |
+          node .figma-sync-engine/bin/figma-sync.js prepare-publish \
+            --base "${{ needs.fetch.outputs.base }}" \
+            --work-ref "origin/figma-sync/work-${{ github.run_id }}"
+
+      - name: Create pull request
+        if: needs.fetch.outputs.due != '[]' && steps.prepare.outputs.skip != 'true'
+        id: pr
+        uses: peter-evans/create-pull-request@v8
+        with:
+          token: ${{ secrets.GITHUB_TOKEN || github.token }}
+          branch: figma-sync/run
+          title: ${{ steps.prepare.outputs.title }}
+          body-path: .figma-sync/work/pr-body.md
+          committer: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
+          delete-branch: false
+
+      - name: Link PR to Figma
+        if: needs.fetch.outputs.due != '[]' && steps.prepare.outputs.skip != 'true' && steps.pr.outputs.pull-request-number != ''
+        env:
+          FIGMA_TOKEN: ${{ secrets.FIGMA_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          node .figma-sync-engine/bin/figma-sync.js after-publish \
+            --pr "${{ steps.pr.outputs.pull-request-number }}"
+
+  cleanup:
+    if: always()
+    needs: [fetch, section, publish]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete work branch
+        run: |
+          git push "https://x-access-token:${{ secrets.GITHUB_TOKEN || github.token }}@github.com/${{ github.repository }}" --delete "figma-sync/work-${{ github.run_id }}" || true

@@ -304,3 +304,56 @@ test('prepare-publish pushes the shots to figma-sync-review under runs/<runId>',
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test('prepare-publish --dry-run pushes nothing', async () => {
+  const { tmp, bareDir, repoDir } = setupGitRepoWithOrigin();
+  try {
+    const baseSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoDir, encoding: 'utf8' }).trim();
+
+    execFileSync('git', ['checkout', '-b', 'dry-run-branch'], { cwd: repoDir });
+    fs.writeFileSync(path.join(repoDir, 'change.txt'), 'diff\n');
+    execFileSync('git', ['add', '.'], { cwd: repoDir });
+    execFileSync('git', ['commit', '-m', 'figma-sync: nav'], { cwd: repoDir });
+    const workRef = 'dry-run-branch';
+
+    execFileSync('git', ['checkout', 'main'], { cwd: repoDir });
+
+    const workDir = path.join(repoDir, '.figma-sync', 'work');
+    const shotsDir = path.join(workDir, 'shots');
+    fs.mkdirSync(shotsDir, { recursive: true });
+    fs.writeFileSync(path.join(shotsDir, 'nav-1440.png'), 'fake-png-1440');
+
+    fs.writeFileSync(
+      path.join(workDir, 'run.json'),
+      JSON.stringify({
+        changeMessage: 'Updated nav',
+        due: [
+          { name: 'nav', hash: 'hash-nav-new', frames: ['1:1', '1:2'] }
+        ]
+      })
+    );
+
+    const map = JSON.parse(fs.readFileSync(path.join(repoDir, '.figma-sync', 'map.json'), 'utf8'));
+
+    const res = await preparePublish({
+      repoDir,
+      base: baseSha,
+      workRef,
+      map,
+      figma: { comment: async () => {} },
+      repo: 'org/repo',
+      runId: '789',
+      dryRun: true
+    });
+
+    assert.strictEqual(res.skip, false);
+    assert(res.title.includes('nav'));
+    assert(fs.existsSync(res.prBodyPath));
+
+    // Bare origin should NOT have figma-sync-review branch
+    const branches = execFileSync('git', ['branch', '-a'], { cwd: bareDir, encoding: 'utf8' });
+    assert(!branches.includes('figma-sync-review'), `Expected no figma-sync-review branch: ${branches}`);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});

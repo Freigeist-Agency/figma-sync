@@ -298,6 +298,7 @@ const subcommands = {
     let repoDir = process.cwd();
     let base = null;
     let workRef = null;
+    let dryRun = false;
 
     for (let i = 0; i < args.length; i++) {
       if (args[i] === '--repo-dir' && args[i + 1]) {
@@ -309,6 +310,8 @@ const subcommands = {
       } else if (args[i] === '--work-ref' && args[i + 1]) {
         workRef = args[i + 1];
         i++;
+      } else if (args[i] === '--dry-run') {
+        dryRun = true;
       }
     }
 
@@ -334,14 +337,19 @@ const subcommands = {
       map,
       figma,
       repo,
-      runId
+      runId,
+      dryRun
     });
 
     if (res.skip) {
       console.log('skip=true');
     } else {
       console.log(`title=${res.title}`);
-      console.log('skip=false');
+      if (dryRun) {
+        console.log(`pr-body=${res.prBodyPath || path.join(repoDir, '.figma-sync', 'work', 'pr-body.md')}`);
+      } else {
+        console.log('skip=false');
+      }
     }
   },
 

@@ -265,7 +265,8 @@ export async function preparePublish({
   figma,
   runUrl,
   runId = process.env.GITHUB_RUN_ID || '1',
-  repo = process.env.GITHUB_REPOSITORY || ''
+  repo = process.env.GITHUB_REPOSITORY || '',
+  dryRun = false
 }) {
   const effectiveRunUrl =
     runUrl ||
@@ -355,9 +356,11 @@ export async function preparePublish({
 
   const effectiveSections = prSections.length > 0 ? prSections : Array.from(diffSections);
 
-  // Push shots to review branch
+  // Push shots to review branch (skipped on dry-run)
   const shotsDir = path.join(workDir, 'shots');
-  pushReviewShots({ repoDir, runId, shotsDir });
+  if (!dryRun) {
+    pushReviewShots({ repoDir, runId, shotsDir });
+  }
 
   // Read checks and shots
   let checks = { ok: true, problems: [] };
@@ -406,9 +409,10 @@ export async function preparePublish({
     checks
   });
 
-  fs.writeFileSync(path.join(workDir, 'pr-body.md'), body);
+  const prBodyPath = path.join(workDir, 'pr-body.md');
+  fs.writeFileSync(prBodyPath, body);
 
-  if (process.env.GITHUB_OUTPUT) {
+  if (!dryRun && process.env.GITHUB_OUTPUT) {
     fs.appendFileSync(process.env.GITHUB_OUTPUT, `title=${title}\nskip=false\n`);
   }
 
@@ -416,6 +420,7 @@ export async function preparePublish({
     skip: false,
     title,
     body,
+    prBodyPath,
     sections: effectiveSections
   };
 }

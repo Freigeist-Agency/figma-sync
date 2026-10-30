@@ -1,0 +1,22 @@
+name: figma-sync
+on:
+  repository_dispatch: { types: [figma-ready] }
+  workflow_dispatch: { inputs: { force: { type: boolean, default: false } } }
+  pull_request: { types: [closed] }
+jobs:
+  sync:
+    if: github.event_name != 'pull_request'
+    concurrency: { group: figma-sync, cancel-in-progress: false }
+    permissions: { contents: write, pull-requests: write }
+    uses: Freigeist-Agency/figma-sync/.github/workflows/sync.yml@v1
+    with:
+      node_id: ${{ github.event.client_payload.node_id }}
+      change_message: ${{ github.event.client_payload.change_message }}
+      force: ${{ inputs.force == true }}
+      wait_seconds: ${{ github.event_name == 'repository_dispatch' && 600 || 0 }}
+    secrets: inherit
+  closed:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'figma-sync/run'
+    permissions: { contents: write, pull-requests: write }
+    uses: Freigeist-Agency/figma-sync/.github/workflows/closed.yml@v1
+    secrets: inherit
