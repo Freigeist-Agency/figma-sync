@@ -6,12 +6,16 @@ import { validate, loadMap } from '../src/config.js';
 import { figmaClient } from '../src/figma.js';
 import { github } from '../src/github.js';
 import { runFetch } from '../src/fetch.js';
+import { runGuard } from '../src/guard.js';
+import { writeSectionPrompt } from '../src/prompt.js';
 
 const USAGE = `Usage: figma-sync <subcommand> [options]
 
 Subcommands:
-  validate [--repo-dir <dir>]   Validate .figma-sync/map.json and referenced files
-  fetch [options]               Fetch Figma node status, renders and fills
+  validate [--repo-dir <dir>]            Validate .figma-sync/map.json and referenced files
+  fetch [options]                        Fetch Figma node status, renders and fills
+  guard --base <sha> --section <name>    Verify no protected files were modified
+  prompt --section <name>                Generate Claude prompt for a section
 `;
 
 const subcommands = {
@@ -98,8 +102,77 @@ const subcommands = {
         `due=${dueJson}\nbase=${res.base || ''}\n`
       );
     }
+  },
+
+  guard: async (args) => {
+    let repoDir = process.cwd();
+    let base = null;
+    let sectionName = null;
+
+    for (let i = 0; i < args.length; i++) {
+      if (args[i] === '--repo-dir' && args[i + 1]) {
+        repoDir = args[i + 1];
+        i++;
+      } else if (args[i] === '--base' && args[i + 1]) {
+        base = args[i + 1];
+        i++;
+      } else if (args[i] === '--section' && args[i + 1]) {
+        sectionName = args[i + 1];
+        i++;
+      }
+    }
+
+    if (!base) {
+      console.error('--base <sha> is required');
+      process.exit(1);
+    }
+    if (!sectionName) {
+      console.error('--section <name> is required');
+      process.exit(1);
+    }
+
+    const map = loadMap(repoDir);
+    const figmaToken = process.env.FIGMA_TOKEN;
+    const figma = figmaToken ? figmaClient({ token: figmaToken }) : null;
+
+    const violations = await runGuard({
+      repoDir,
+      base,
+      sectionName,
+      map,
+      figma
+    });
+
+    if (violations.length > 0) {
+      console.error(`Sync stopped: it changed protected files: ${violations.join(', ')}`);
+      process.exit(1);
+    }
+  },
+
+  prompt: async (args) => {
+    let repoDir = process.cwd();
+    let sectionName = null;
+
+    for (let i = 0; i < args.length; i++) {
+      if (args[i] === '--repo-dir' && args[i + 1]) {
+        repoDir = args[i + 1];
+        i++;
+      } else if (args[i] === '--section' && args[i + 1]) {
+        sectionName = args[i + 1];
+        i++;
+      }
+    }
+
+    if (!sectionName) {
+      console.error('--section <name> is required');
+      process.exit(1);
+    }
+
+    const map = loadMap(repoDir);
+    const writtenPath = writeSectionPrompt(repoDir, map, sectionName);
+    console.log(writtenPath);
   }
-  // Later tasks will add: guard, prompt, shots, smoke, prepare-publish, after-publish, closed
+  // Later tasks will add: shots, smoke, prepare-publish, after-publish, closed
 };
 
 async function main() {
