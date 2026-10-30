@@ -11,6 +11,8 @@ import { runFetch } from '../src/fetch.js';
 import { runGuard } from '../src/guard.js';
 import { writeSectionPrompt } from '../src/prompt.js';
 import { shootSections, smoke } from '../src/shots.js';
+import { preparePublish, afterPublish } from '../src/publish.js';
+import { runClosed } from '../src/close.js';
 
 const USAGE = `Usage: figma-sync <subcommand> [options]
 
@@ -21,6 +23,9 @@ Subcommands:
   prompt --section <name>                Generate Claude prompt for a section
   shots [--repo-dir <dir>]               Capture section screenshots at 3 widths
   smoke [--repo-dir <dir>] [--base <sha>] Run smoke checks and map checks
+  prepare-publish --base <sha> --work-ref <ref> Prepare PR body and sync state
+  after-publish --pr <n>                 Add dev resources to Figma frames
+  closed --pr <n> --merged <bool> --base-sha <sha> --head-sha <sha> Handle PR closure
 `;
 
 const subcommands = {
@@ -287,8 +292,182 @@ const subcommands = {
     } else {
       console.log(`Smoke & checks completed with ${problems.length} problem(s)`);
     }
+  },
+
+  'prepare-publish': async (args) => {
+    let repoDir = process.cwd();
+    let base = null;
+    let workRef = null;
+
+    for (let i = 0; i < args.length; i++) {
+      if (args[i] === '--repo-dir' && args[i + 1]) {
+        repoDir = args[i + 1];
+        i++;
+      } else if (args[i] === '--base' && args[i + 1]) {
+        base = args[i + 1];
+        i++;
+      } else if (args[i] === '--work-ref' && args[i + 1]) {
+        workRef = args[i + 1];
+        i++;
+      }
+    }
+
+    if (!base) {
+      console.error('--base <sha> is required');
+      process.exit(1);
+    }
+    if (!workRef) {
+      console.error('--work-ref <ref> is required');
+      process.exit(1);
+    }
+
+    const map = loadMap(repoDir);
+    const figmaToken = process.env.FIGMA_TOKEN;
+    const figma = figmaToken ? figmaClient({ token: figmaToken }) : null;
+    const repo = process.env.GITHUB_REPOSITORY;
+    const runId = process.env.GITHUB_RUN_ID;
+
+    const res = await preparePublish({
+      repoDir,
+      base,
+      workRef,
+      map,
+      figma,
+      repo,
+      runId
+    });
+
+    if (res.skip) {
+      console.log('skip=true');
+    } else {
+      console.log(`title=${res.title}`);
+      console.log('skip=false');
+    }
+  },
+
+  'after-publish': async (args) => {
+    let repoDir = process.cwd();
+    let pr = null;
+
+    for (let i = 0; i < args.length; i++) {
+      if (args[i] === '--repo-dir' && args[i + 1]) {
+        repoDir = args[i + 1];
+        i++;
+      } else if (args[i] === '--pr' && args[i + 1]) {
+        pr = args[i + 1];
+        i++;
+      }
+    }
+
+    if (!pr) {
+      console.error('--pr <n> is required');
+      process.exit(1);
+    }
+
+    const figmaToken = process.env.FIGMA_TOKEN;
+    const repo = process.env.GITHUB_REPOSITORY;
+
+    if (!figmaToken) {
+      console.error('FIGMA_TOKEN is required in environment');
+      process.exit(1);
+    }
+    if (!repo) {
+      console.error('GITHUB_REPOSITORY is required in environment');
+      process.exit(1);
+    }
+
+    const map = loadMap(repoDir);
+    const figma = figmaClient({ token: figmaToken });
+
+    await afterPublish({
+      repoDir,
+      prNumber: pr,
+      map,
+      figma,
+      repo
+    });
+
+    console.log(`Linked PR #${pr} to Figma`);
+  },
+
+  closed: async (args) => {
+    let repoDir = process.cwd();
+    let pr = null;
+    let merged = null;
+    let baseSha = null;
+    let headSha = null;
+
+    for (let i = 0; i < args.length; i++) {
+      if (args[i] === '--repo-dir' && args[i + 1]) {
+        repoDir = args[i + 1];
+        i++;
+      } else if (args[i] === '--pr' && args[i + 1]) {
+        pr = args[i + 1];
+        i++;
+      } else if (args[i] === '--merged' && args[i + 1]) {
+        merged = args[i + 1];
+        i++;
+      } else if (args[i] === '--base-sha' && args[i + 1]) {
+        baseSha = args[i + 1];
+        i++;
+      } else if (args[i] === '--head-sha' && args[i + 1]) {
+        headSha = args[i + 1];
+        i++;
+      }
+    }
+
+    if (!pr) {
+      console.error('--pr <n> is required');
+      process.exit(1);
+    }
+    if (merged === null) {
+      console.error('--merged true|false is required');
+      process.exit(1);
+    }
+    if (!baseSha) {
+      console.error('--base-sha <sha> is required');
+      process.exit(1);
+    }
+    if (!headSha) {
+      console.error('--head-sha <sha> is required');
+      process.exit(1);
+    }
+
+    const figmaToken = process.env.FIGMA_TOKEN;
+    const ghToken = process.env.GITHUB_TOKEN;
+    const repo = process.env.GITHUB_REPOSITORY;
+
+    if (!figmaToken) {
+      console.error('FIGMA_TOKEN is required in environment');
+      process.exit(1);
+    }
+    if (!ghToken) {
+      console.error('GITHUB_TOKEN is required in environment');
+      process.exit(1);
+    }
+    if (!repo) {
+      console.error('GITHUB_REPOSITORY is required in environment');
+      process.exit(1);
+    }
+
+    const map = loadMap(repoDir);
+    const figma = figmaClient({ token: figmaToken });
+    const gh = github({ token: ghToken, repo });
+
+    const res = await runClosed({
+      pr: {
+        number: pr,
+        merged: merged === 'true' || merged === true,
+        baseSha,
+        headSha
+      },
+      gh,
+      figma,
+      map
+    });
+
+    console.log(`Handled closure for PR #${pr} (merged: ${res.merged}, synced sections: ${res.syncedSections.join(', ')})`);
   }
-  // Later tasks will add: prepare-publish, after-publish, closed
 };
 
 async function main() {
