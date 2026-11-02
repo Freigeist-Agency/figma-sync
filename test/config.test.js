@@ -384,3 +384,69 @@ test('an empty frame id is rejected', () => {
     }
   }
 });
+
+test('ready must be a non-empty string when present', () => {
+  const baseMap = {
+    fileKey: 'key1',
+    tokens: 'tokens.css',
+    assets: 'assets',
+    protected: ['js/**'],
+    sections: [
+      {
+        name: 'header',
+        frames: ['1:1', '1:2'],
+        files: ['index.html'],
+        selector: 'header',
+        page: 'index.html'
+      }
+    ]
+  };
+
+  // absent accepted
+  const dirAbsent = createTempRepo(baseMap);
+  try {
+    const loaded = loadMap(dirAbsent);
+    assert.strictEqual(loaded.ready, undefined);
+  } finally {
+    fs.rmSync(dirAbsent, { recursive: true, force: true });
+  }
+
+  // 'html.is-loaded' accepted
+  const dirValid = createTempRepo({ ...baseMap, ready: 'html.is-loaded' });
+  try {
+    const loaded = loadMap(dirValid);
+    assert.strictEqual(loaded.ready, 'html.is-loaded');
+  } finally {
+    fs.rmSync(dirValid, { recursive: true, force: true });
+  }
+
+  // '' rejected
+  const dirEmpty = createTempRepo({ ...baseMap, ready: '' });
+  try {
+    assert.throws(
+      () => loadMap(dirEmpty),
+      (err) => {
+        assert(err instanceof Error);
+        assert.strictEqual(err.message, 'Field "ready" must be a non-empty string');
+        return true;
+      }
+    );
+  } finally {
+    fs.rmSync(dirEmpty, { recursive: true, force: true });
+  }
+
+  // 5 rejected
+  const dirNumber = createTempRepo({ ...baseMap, ready: 5 });
+  try {
+    assert.throws(
+      () => loadMap(dirNumber),
+      (err) => {
+        assert(err instanceof Error);
+        assert.strictEqual(err.message, 'Field "ready" must be a non-empty string');
+        return true;
+      }
+    );
+  } finally {
+    fs.rmSync(dirNumber, { recursive: true, force: true });
+  }
+});

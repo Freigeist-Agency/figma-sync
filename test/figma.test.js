@@ -294,3 +294,63 @@ test('throws FigmaError without retrying on 4xx errors', async () => {
 
   assert.strictEqual(calls, 1);
 });
+
+test('a dropped connection is retried', async () => {
+  const delays = [];
+  const fakeSleep = async (ms) => {
+    delays.push(ms);
+  };
+  let calls = 0;
+  const fakeFetch = async () => {
+    calls++;
+    if (calls < 3) {
+      throw new Error('ETIMEDOUT');
+    }
+    return new Response(JSON.stringify({ ok: true }), { status: 200 });
+  };
+
+  const client = figmaClient({
+    token: 'fake-token',
+    fetch: fakeFetch,
+    sleep: fakeSleep
+  });
+
+  const result = await client.getNodes('file1', ['1:1']);
+  assert.strictEqual(calls, 3);
+  assert.deepStrictEqual(delays, [2000, 4000]);
+  assert.deepStrictEqual(result, { ok: true });
+});
+
+test('a connection that never comes back is a FigmaError', async () => {
+  const delays = [];
+  const fakeSleep = async (ms) => {
+    delays.push(ms);
+  };
+  let calls = 0;
+  const fakeFetch = async () => {
+    calls++;
+    throw new Error('ECONNRESET');
+  };
+
+  const client = figmaClient({
+    token: 'fake-token',
+    fetch: fakeFetch,
+    sleep: fakeSleep
+  });
+
+  await assert.rejects(
+    async () => {
+      await client.getNodes('file1', ['1:1']);
+    },
+    (err) => {
+      assert(err instanceof FigmaError);
+      assert.strictEqual(err.status, 0);
+      assert.strictEqual(err.message, 'Figma API request failed: ECONNRESET');
+      return true;
+    }
+  );
+
+  assert.strictEqual(calls, 4);
+  assert.deepStrictEqual(delays, [2000, 4000, 8000]);
+});
+

@@ -34,10 +34,19 @@ export function figmaClient({ token, fetch = globalThis.fetch, sleep }) {
     const defaultDelays = [2000, 4000, 8000];
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      const res = await fetch(url, {
-        ...options,
-        headers
-      });
+      let res;
+      try {
+        res = await fetch(url, {
+          ...options,
+          headers
+        });
+      } catch (err) {
+        if (attempt === maxAttempts) {
+          throw new FigmaError(`Figma API request failed: ${err.message}`, 0);
+        }
+        await doSleep(defaultDelays[attempt - 1]);
+        continue;
+      }
 
       if (res.ok) {
         return res;

@@ -209,7 +209,8 @@ const subcommands = {
     const shotsList = await shootSections({
       repoDir,
       sections: sectionsToShoot,
-      outDir
+      outDir,
+      ready: map.ready
     });
 
     fs.writeFileSync(path.join(workDir, 'shots.json'), JSON.stringify(shotsList, null, 2));

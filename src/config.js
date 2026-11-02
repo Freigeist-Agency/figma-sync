@@ -51,6 +51,9 @@ export function loadMap(repoDir) {
   if (map.checks !== undefined && typeof map.checks !== 'string') {
     throw new Error('Field "checks" must be a string');
   }
+  if (map.ready !== undefined && (typeof map.ready !== 'string' || !map.ready.trim())) {
+    throw new Error('Field "ready" must be a non-empty string');
+  }
 
   const seenSectionNames = new Set();
   const seenFrameIds = new Set();

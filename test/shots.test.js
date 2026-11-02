@@ -138,3 +138,129 @@ test('smoke passes the clean fixture', async () => {
   assert.strictEqual(res.ok, true);
   assert.deepStrictEqual(res.problems, []);
 });
+
+function createLoaderSite() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'figma-loader-site-'));
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    section.target {
+      width: 100px;
+      height: 100px;
+      background: #ccc;
+    }
+    html.is-loaded section.target {
+      width: 400px;
+    }
+  </style>
+</head>
+<body>
+  <section class="target">Content</section>
+  <script>
+    setTimeout(() => {
+      document.documentElement.classList.add('is-loaded');
+    }, 300);
+  </script>
+</body>
+</html>`;
+  fs.writeFileSync(path.join(dir, 'index.html'), html);
+  return dir;
+}
+
+test('ready waits for the site before the shot', async () => {
+  const siteDir = createLoaderSite();
+  const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'figma-shots-ready-'));
+  const sections = [
+    {
+      name: 'target',
+      selector: 'section.target',
+      page: 'index.html'
+    }
+  ];
+
+  try {
+    const shots = await shootSections({
+      repoDir: siteDir,
+      sections,
+      outDir,
+      ready: 'html.is-loaded'
+    });
+
+    assert.strictEqual(shots.length, 3);
+    for (const shot of shots) {
+      assert(shot.file, `Expected shot.file for width ${shot.width}`);
+      const buf = fs.readFileSync(path.join(outDir, shot.file));
+      const width = buf.readUInt32BE(16);
+      assert.strictEqual(width, 400);
+    }
+  } finally {
+    fs.rmSync(siteDir, { recursive: true, force: true });
+    fs.rmSync(outDir, { recursive: true, force: true });
+  }
+});
+
+test('without ready the shot is taken at load', async () => {
+  const siteDir = createLoaderSite();
+  const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'figma-shots-noready-'));
+  const sections = [
+    {
+      name: 'target',
+      selector: 'section.target',
+      page: 'index.html'
+    }
+  ];
+
+  try {
+    const shots = await shootSections({
+      repoDir: siteDir,
+      sections,
+      outDir
+    });
+
+    assert.strictEqual(shots.length, 3);
+    for (const shot of shots) {
+      assert(shot.file, `Expected shot.file for width ${shot.width}`);
+      const buf = fs.readFileSync(path.join(outDir, shot.file));
+      const width = buf.readUInt32BE(16);
+      assert.strictEqual(width, 100);
+    }
+  } finally {
+    fs.rmSync(siteDir, { recursive: true, force: true });
+    fs.rmSync(outDir, { recursive: true, force: true });
+  }
+});
+
+test('a page that never becomes ready records an error and no file', async () => {
+  const siteDir = createLoaderSite();
+  const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'figma-shots-never-'));
+  const sections = [
+    {
+      name: 'target',
+      selector: 'section.target',
+      page: 'index.html'
+    }
+  ];
+
+  try {
+    const shots = await shootSections({
+      repoDir: siteDir,
+      sections,
+      outDir,
+      ready: 'html.never',
+      readyTimeout: 100
+    });
+
+    assert.strictEqual(shots.length, 3);
+    for (const shot of shots) {
+      assert.match(shot.error, /never became ready/);
+      assert.strictEqual(shot.file, undefined);
+    }
+    const files = fs.readdirSync(outDir).filter((f) => f.endsWith('.png'));
+    assert.strictEqual(files.length, 0);
+  } finally {
+    fs.rmSync(siteDir, { recursive: true, force: true });
+    fs.rmSync(outDir, { recursive: true, force: true });
+  }
+});
+

@@ -14,9 +14,11 @@ const WIDTHS = [375, 768, 1440];
  * @param {string} options.repoDir
  * @param {Array<{ name: string, selector: string, page: string }>} options.sections
  * @param {string} options.outDir
+ * @param {string} [options.ready]
+ * @param {number} [options.readyTimeout=15000]
  * @returns {Promise<Array<{ section: string, width: number, file?: string, figma?: "desktop" | "mobile", error?: string }>>}
  */
-export async function shootSections({ repoDir, sections, outDir }) {
+export async function shootSections({ repoDir, sections, outDir, ready, readyTimeout = 15000 }) {
   fs.mkdirSync(outDir, { recursive: true });
 
   const server = await serveDir(repoDir);
@@ -42,6 +44,14 @@ export async function shootSections({ repoDir, sections, outDir }) {
         try {
           const pagePath = section.page.startsWith('/') ? section.page : `/${section.page}`;
           await page.goto(`${server.url}${pagePath}`, { waitUntil: 'load' });
+          if (ready) {
+            try {
+              await page.locator(ready).first().waitFor({ state: 'attached', timeout: readyTimeout });
+            } catch {
+              shot.error = `page never became ready (${ready})`;
+              continue;
+            }
+          }
           await page.evaluate(() => document.fonts?.ready);
 
           const loc = page.locator(section.selector).first();

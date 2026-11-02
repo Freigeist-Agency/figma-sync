@@ -54,6 +54,8 @@ Create `.figma-sync/map.json` at the root of your site repository:
 }
 ```
 
+Optional top-level `ready` CSS selector (e.g. `"html.is-loaded"`) waits for site loaders before taking section screenshots.
+
 Initialize `.figma-sync/state.json`:
 ```json
 {
