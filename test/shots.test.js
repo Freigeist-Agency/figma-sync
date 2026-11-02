@@ -264,3 +264,95 @@ test('a page that never becomes ready records an error and no file', async () =>
   }
 });
 
+const PIXEL_PNG_BASE64 =
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+
+function createLazySite() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'figma-lazy-site-'));
+  fs.writeFileSync(path.join(dir, 'pixel.png'), Buffer.from(PIXEL_PNG_BASE64, 'base64'));
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>initial</title>
+  <style>
+    body {
+      margin: 0;
+    }
+    .spacer {
+      height: 3000px;
+      margin-bottom: 1000px;
+    }
+    section.lazy-target {
+      width: 400px;
+      height: 100px;
+      background: #eee;
+    }
+  </style>
+</head>
+<body>
+  <div class="spacer"></div>
+  <section class="lazy-target">
+    <img loading="lazy" src="pixel.png" width="400" height="100">
+  </section>
+  <script>
+    const img = document.querySelector('img');
+    const sec = document.querySelector('section.lazy-target');
+    img.addEventListener('load', () => {
+      if (img.complete && img.naturalWidth > 0) {
+        sec.setAttribute('data-loaded', 'true');
+        document.title = 'loaded';
+      }
+    });
+  </script>
+</body>
+</html>`;
+  fs.writeFileSync(path.join(dir, 'index.html'), html);
+  return dir;
+}
+
+test('a lazy image below the fold is loaded before the shot', async () => {
+  const siteDir = createLazySite();
+  const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'figma-shots-lazy-'));
+  const sections = [
+    {
+      name: 'lazy',
+      selector: 'section.lazy-target',
+      page: 'index.html'
+    }
+  ];
+
+  const titles = [];
+  const loadedAttrs = [];
+  try {
+    const shots = await shootSections({
+      repoDir: siteDir,
+      sections,
+      outDir,
+      onBeforeShot: async (page, section) => {
+        titles.push(await page.title());
+        loadedAttrs.push(await page.locator(section.selector).getAttribute('data-loaded'));
+      }
+    });
+
+    assert.strictEqual(shots.length, 3);
+    for (const shot of shots) {
+      assert.strictEqual(shot.error, undefined);
+      assert(shot.file, `Expected shot.file for width ${shot.width}`);
+      assert(fs.existsSync(path.join(outDir, shot.file)));
+    }
+    assert.strictEqual(titles.length, 3);
+    for (const title of titles) {
+      assert.strictEqual(title, 'loaded');
+    }
+    assert.strictEqual(loadedAttrs.length, 3);
+    for (const attr of loadedAttrs) {
+      assert.strictEqual(attr, 'true');
+    }
+  } finally {
+    fs.rmSync(siteDir, { recursive: true, force: true });
+    fs.rmSync(outDir, { recursive: true, force: true });
+  }
+});
+
+

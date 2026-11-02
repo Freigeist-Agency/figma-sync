@@ -6,6 +6,41 @@ import { serveDir } from './serve.js';
 const WIDTHS = [375, 768, 1440];
 
 /**
+ * Scrolls the whole page once from top to bottom and back, then waits for all images to complete.
+ * Ensures lazy-loaded images and scroll-triggered content run before section screenshots.
+ *
+ * @param {import('playwright').Page} page
+ */
+export async function settlePage(page) {
+  await page.evaluate(async () => {
+    const vh = window.innerHeight;
+    const getScrollHeight = () =>
+      Math.max(document.body ? document.body.scrollHeight : 0, document.documentElement.scrollHeight);
+
+    if (getScrollHeight() > vh) {
+      for (let y = vh; y < getScrollHeight(); y += vh) {
+        window.scrollTo({ top: y, behavior: 'instant' });
+        await new Promise((resolve) => setTimeout(resolve, 120));
+      }
+      for (let y = window.scrollY; y > 0; y -= vh) {
+        window.scrollTo({ top: Math.max(0, y - vh), behavior: 'instant' });
+        await new Promise((resolve) => setTimeout(resolve, 120));
+      }
+      window.scrollTo({ top: 0, behavior: 'instant' });
+    }
+  });
+
+  try {
+    await page.waitForFunction(
+      () => Array.from(document.querySelectorAll('img')).every((img) => img.complete),
+      { timeout: 5000 }
+    );
+  } catch {
+    // A timeout is not an error, carry on.
+  }
+}
+
+/**
  * Shoots screenshots of given sections at 3 widths (375, 768, 1440).
  * Pairs 1440 with desktop and 375 with mobile.
  * Selector not found returns an error object without throwing.
@@ -16,9 +51,10 @@ const WIDTHS = [375, 768, 1440];
  * @param {string} options.outDir
  * @param {string} [options.ready]
  * @param {number} [options.readyTimeout=15000]
+ * @param {(page: import('playwright').Page, section: { name: string, selector: string, page: string }) => Promise<void>|void} [options.onBeforeShot]
  * @returns {Promise<Array<{ section: string, width: number, file?: string, figma?: "desktop" | "mobile", error?: string }>>}
  */
-export async function shootSections({ repoDir, sections, outDir, ready, readyTimeout = 15000 }) {
+export async function shootSections({ repoDir, sections, outDir, ready, readyTimeout = 15000, onBeforeShot }) {
   fs.mkdirSync(outDir, { recursive: true });
 
   const server = await serveDir(repoDir);
@@ -53,6 +89,7 @@ export async function shootSections({ repoDir, sections, outDir, ready, readyTim
             }
           }
           await page.evaluate(() => document.fonts?.ready);
+          await settlePage(page);
 
           const loc = page.locator(section.selector).first();
           // Fail fast if the selector is not on the page, rather than Playwright's 30 s default.
@@ -62,9 +99,13 @@ export async function shootSections({ repoDir, sections, outDir, ready, readyTim
             continue;
           }
 
+          if (onBeforeShot) {
+            await onBeforeShot(page, section);
+          }
+
           const fileName = `${section.name}-${width}.png`;
           const filePath = path.join(outDir, fileName);
-          await loc.screenshot({ path: filePath, timeout: 3500 });
+          await loc.screenshot({ path: filePath, timeout: 15000 });
 
           shot.file = fileName;
         } catch (err) {
