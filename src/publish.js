@@ -83,7 +83,7 @@ export function prBody({
       : '—';
     const mobileFigmaLink = mobileFrame
       ? `[Mobile Frame](https://www.figma.com/design/${fileKey}/?node-id=${mobileFrame.replaceAll(':', '-')})`
-      : '—';
+      : 'none (desktop only)';
 
     const renderCell = (shot) => {
       if (!shot) return '—';

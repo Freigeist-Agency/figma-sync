@@ -146,3 +146,172 @@ test('hash changes when text, a fill or padding changes', () => {
   const paddingHash = sectionHash(paddingChangedFrames);
   assert.notStrictEqual(paddingHash, baseHash);
 });
+
+test('moving the whole frame on the canvas keeps the hash', () => {
+  const tree = {
+    id: '1:0',
+    name: 'Root',
+    type: 'FRAME',
+    absoluteBoundingBox: { x: 100, y: 200, width: 500, height: 500 },
+    children: [
+      {
+        id: '1:1',
+        name: 'Child',
+        type: 'FRAME',
+        absoluteBoundingBox: { x: 130, y: 260, width: 200, height: 200 },
+        children: [
+          {
+            id: '1:2',
+            name: 'Grandchild',
+            type: 'FRAME',
+            absoluteBoundingBox: { x: 140, y: 270, width: 50, height: 50 }
+          }
+        ]
+      }
+    ]
+  };
+
+  // Every absoluteBoundingBox shifted by (+500, +300)
+  const shiftedTree = {
+    id: '1:0',
+    name: 'Root',
+    type: 'FRAME',
+    absoluteBoundingBox: { x: 600, y: 500, width: 500, height: 500 },
+    children: [
+      {
+        id: '1:1',
+        name: 'Child',
+        type: 'FRAME',
+        absoluteBoundingBox: { x: 630, y: 560, width: 200, height: 200 },
+        children: [
+          {
+            id: '1:2',
+            name: 'Grandchild',
+            type: 'FRAME',
+            absoluteBoundingBox: { x: 640, y: 570, width: 50, height: 50 }
+          }
+        ]
+      }
+    ]
+  };
+
+  const hashOriginal = sectionHash([trimNode(tree)]);
+  const hashShifted = sectionHash([trimNode(shiftedTree)]);
+  assert.strictEqual(hashShifted, hashOriginal);
+});
+
+test('moving a layer inside the frame changes the hash', () => {
+  const tree = {
+    id: '1:0',
+    name: 'Root',
+    type: 'FRAME',
+    absoluteBoundingBox: { x: 100, y: 200, width: 500, height: 500 },
+    children: [
+      {
+        id: '1:1',
+        name: 'Child',
+        type: 'FRAME',
+        absoluteBoundingBox: { x: 130, y: 260, width: 200, height: 200 },
+        children: [
+          {
+            id: '1:2',
+            name: 'Grandchild',
+            type: 'FRAME',
+            absoluteBoundingBox: { x: 140, y: 270, width: 50, height: 50 }
+          }
+        ]
+      }
+    ]
+  };
+
+  // Shift one child and its descendants by y + 40
+  const shiftedChildTree = {
+    id: '1:0',
+    name: 'Root',
+    type: 'FRAME',
+    absoluteBoundingBox: { x: 100, y: 200, width: 500, height: 500 },
+    children: [
+      {
+        id: '1:1',
+        name: 'Child',
+        type: 'FRAME',
+        absoluteBoundingBox: { x: 130, y: 300, width: 200, height: 200 },
+        children: [
+          {
+            id: '1:2',
+            name: 'Grandchild',
+            type: 'FRAME',
+            absoluteBoundingBox: { x: 140, y: 310, width: 50, height: 50 }
+          }
+        ]
+      }
+    ]
+  };
+
+  const hashOriginal = sectionHash([trimNode(tree)]);
+  const hashMoved = sectionHash([trimNode(shiftedChildTree)]);
+  assert.notStrictEqual(hashMoved, hashOriginal);
+});
+
+test('children carry their position relative to the parent', () => {
+  const root = {
+    id: '1:0',
+    name: 'Root',
+    type: 'FRAME',
+    absoluteBoundingBox: { x: 100, y: 200, width: 500, height: 500 },
+    children: [
+      {
+        id: '1:1',
+        name: 'Child',
+        type: 'FRAME',
+        absoluteBoundingBox: { x: 130, y: 260, width: 200, height: 200 },
+        children: [
+          {
+            id: '1:2',
+            name: 'Grandchild',
+            type: 'FRAME',
+            absoluteBoundingBox: { x: 140, y: 270, width: 50, height: 50 }
+          }
+        ]
+      }
+    ]
+  };
+
+  const trimmed = trimNode(root);
+  assert.strictEqual(trimmed.pos, undefined);
+  assert.deepStrictEqual(trimmed.children[0].pos, { x: 30, y: 60 });
+  assert.deepStrictEqual(trimmed.children[0].children[0].pos, { x: 10, y: 10 });
+
+  // Check rounding to 2 decimals
+  const rootWithDecimals = {
+    absoluteBoundingBox: { x: 100, y: 200, width: 500, height: 500 },
+    children: [
+      {
+        absoluteBoundingBox: { x: 130.456, y: 260.789, width: 200, height: 200 }
+      }
+    ]
+  };
+  const trimmedDecimals = trimNode(rootWithDecimals);
+  assert.deepStrictEqual(trimmedDecimals.children[0].pos, { x: 30.46, y: 60.79 });
+});
+
+test('a numeric second argument is ignored', () => {
+  const root = {
+    id: '1:0',
+    name: 'Root',
+    type: 'FRAME',
+    absoluteBoundingBox: { x: 100, y: 200, width: 500, height: 500 },
+    children: [
+      {
+        id: '1:1',
+        name: 'Child',
+        type: 'FRAME',
+        absoluteBoundingBox: { x: 130, y: 260, width: 200, height: 200 }
+      }
+    ]
+  };
+
+  const fromMap = [root].map(trimNode)[0];
+  const direct = trimNode(root);
+  assert.deepStrictEqual(fromMap, direct);
+});

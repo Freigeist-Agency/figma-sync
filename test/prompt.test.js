@@ -78,3 +78,52 @@ test('writeSectionPrompt writes prompt.md under work dir and returns file path',
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
+
+test('the prompt for a one-frame section says there is no mobile design', () => {
+  const map = {
+    fileKey: 'key1',
+    tokens: 'tokens.css',
+    assets: 'assets',
+    protected: ['js/**'],
+    sections: [
+      {
+        name: 'header',
+        frames: ['1:1'],
+        files: ['index.html'],
+        selector: 'header',
+        page: 'index.html'
+      }
+    ]
+  };
+  const section = map.sections[0];
+  const workDir = '/test/repo/.figma-sync/work';
+
+  const prompt = buildPrompt(map, section, workDir);
+
+  assert(prompt.includes('there is no mobile design. Keep the existing mobile layout working, do not redesign it.'));
+  assert(prompt.includes('(present only when the section has a mobile frame)'));
+  assert.strictEqual(prompt.match(/\{\{[a-zA-Z0-9_-]+\}\}/g), null);
+});
+
+test('the prompt for a two-frame section keeps the mobile design', () => {
+  const map = {
+    fileKey: 'key1',
+    tokens: 'tokens.css',
+    assets: 'assets',
+    protected: ['js/**'],
+    sections: [
+      {
+        name: 'header',
+        frames: ['1:1', '1:2'],
+        files: ['index.html'],
+        selector: 'header',
+        page: 'index.html'
+      }
+    ]
+  };
+
+  const prompt = buildPrompt(map, map.sections[0], '/test/repo/.figma-sync/work');
+
+  assert(prompt.includes('`mobile.png` is the mobile frame at its own width.'));
+  assert(!prompt.includes('there is no mobile design'));
+});

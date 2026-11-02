@@ -110,8 +110,8 @@ test('loadMap accepts test/fixtures/map.json (the MTM shape) and rejects each in
     }
   }
 
-  // 5. Section without exactly 2 frames
-  for (const badFrames of [[], ['1:1'], ['1:1', '1:2', '1:3']]) {
+  // 5. Section without 1 or 2 frames
+  for (const badFrames of [[], ['1:1', '1:2', '1:3']]) {
     const invalid = {
       ...baseMap,
       sections: [{ ...baseMap.sections[0], frames: badFrames }]
@@ -304,5 +304,83 @@ test('validate succeeds when all files globs and pages exist', () => {
     assert.deepStrictEqual(res.errors, []);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a section with one frame is valid', () => {
+  const map = {
+    fileKey: 'key1',
+    tokens: 'tokens.css',
+    assets: 'assets',
+    protected: ['js/**'],
+    sections: [
+      {
+        name: 'header',
+        frames: ['1:1'],
+        files: ['index.html'],
+        selector: 'header',
+        page: 'index.html'
+      }
+    ]
+  };
+
+  const dir = createTempRepo(map);
+  try {
+    const loaded = loadMap(dir);
+    assert.strictEqual(loaded.sections[0].frames.length, 1);
+    assert.deepStrictEqual(loaded.sections[0].frames, ['1:1']);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a section with three frames is rejected', () => {
+  const map = {
+    fileKey: 'key1',
+    tokens: 'tokens.css',
+    assets: 'assets',
+    protected: ['js/**'],
+    sections: [
+      {
+        name: 'header',
+        frames: ['1:1', '1:2', '1:3'],
+        files: ['index.html'],
+        selector: 'header',
+        page: 'index.html'
+      }
+    ]
+  };
+
+  const dir = createTempRepo(map);
+  try {
+    assert.throws(
+      () => loadMap(dir),
+      (err) => {
+        assert(err instanceof Error);
+        assert.match(err.message, /must contain 1 or 2 frame IDs/);
+        return true;
+      }
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('an empty frame id is rejected', () => {
+  for (const frames of [[''], ['1:1', '']]) {
+    const dir = createTempRepo({
+      fileKey: 'key1',
+      tokens: 'tokens.css',
+      assets: 'assets',
+      protected: ['js/**'],
+      sections: [
+        { name: 'header', frames, files: ['index.html'], selector: 'header', page: 'index.html' }
+      ]
+    });
+    try {
+      assert.throws(() => loadMap(dir), /frames/i);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   }
 });

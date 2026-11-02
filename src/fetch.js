@@ -213,10 +213,10 @@ async function runFetchInternal({
     fs.writeFileSync(path.join(secDir, 'tree.json'), JSON.stringify(item.trimmed, null, 2));
 
     // Download renders
-    if (renderImages[desktopId]) {
+    if (desktopId && renderImages[desktopId]) {
       await figma.download(renderImages[desktopId], path.join(secDir, 'desktop.png'));
     }
-    if (renderImages[mobileId]) {
+    if (mobileId && renderImages[mobileId]) {
       await figma.download(renderImages[mobileId], path.join(secDir, 'mobile.png'));
     }
 

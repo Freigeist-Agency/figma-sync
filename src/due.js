@@ -62,17 +62,17 @@ export function decide(map, nodesResponse, lastHashes = {}, { force = false } = 
       continue;
     }
 
-    // Both frames must have devStatus.type === 'READY_FOR_DEV'
-    const bothReady = frameEntries.length === 2 && frameEntries.every(
-      (doc) => doc.devStatus?.type === 'READY_FOR_DEV'
-    );
+    // All of section.frames resolved and ready (devStatus.type === 'READY_FOR_DEV')
+    const allReady =
+      frameEntries.length === (section.frames || []).length &&
+      frameEntries.every((doc) => doc.devStatus?.type === 'READY_FOR_DEV');
 
-    if (!bothReady) {
+    if (!allReady) {
       notReady.push(section.name);
       continue;
     }
 
-    // Both frames are ready; compute trimmed trees and section hash
+    // All listed frames are ready; compute trimmed trees and section hash
     const trimmed = frameEntries.map(trimNode);
     const hash = sectionHash(trimmed);
     const lastHash = lastHashes[section.name];

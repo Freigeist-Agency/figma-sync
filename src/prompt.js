@@ -23,6 +23,9 @@ export function buildPrompt(map, section, workDir) {
   const filesList = (section.files || []).map((f) => `- ${f}`).join('\n');
   const allProtected = protectedGlobs(map);
   const protectedList = allProtected.map((p) => `- ${p}`).join('\n');
+  const mobile = section.frames?.length === 2
+    ? '`mobile.png` is the mobile frame at its own width. Match each at that width.'
+    : 'there is no mobile design. Keep the existing mobile layout working, do not redesign it.';
 
   let result = template;
   result = result.replaceAll('{{section}}', section.name);
@@ -32,6 +35,7 @@ export function buildPrompt(map, section, workDir) {
   result = result.replaceAll('{{assets}}', map.assets || '');
   result = result.replaceAll('{{files}}', filesList);
   result = result.replaceAll('{{protected}}', protectedList);
+  result = result.replaceAll('{{mobile}}', mobile);
   result = result.replaceAll('{{workDir}}', sectionWorkDir);
 
   return result;

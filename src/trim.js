@@ -1,14 +1,26 @@
 import crypto from 'node:crypto';
 
 /**
+ * Rounds a number to 2 decimal places.
+ * @param {number} val
+ * @returns {number}
+ */
+function round2(val) {
+  const rounded = Math.round(val * 100) / 100;
+  return Object.is(rounded, -0) ? 0 : rounded;
+}
+
+/**
  * Trims a Figma node tree keeping only visual layout, styling, text, and size properties.
- * Drops ids, devStatus, position coordinates (x, y), and non-visual metadata.
+ * Drops ids, devStatus, and non-visual metadata; drops canvas offsets, keeps positions relative to the parent.
  * @param {object} node
+ * @param {object|null} [parentBox=null]
  * @returns {object}
  */
-export function trimNode(node) {
+export function trimNode(node, parentBox = null) {
   if (!node || typeof node !== 'object') return node;
 
+  const parent = parentBox && typeof parentBox === 'object' ? parentBox : null;
   const out = {};
 
   if (node.type !== undefined) out.type = node.type;
@@ -72,6 +84,23 @@ export function trimNode(node) {
     }
   }
 
+  // Position { x, y } relative to parent absoluteBoundingBox
+  if (
+    node.absoluteBoundingBox &&
+    typeof node.absoluteBoundingBox === 'object' &&
+    parent &&
+    node.absoluteBoundingBox.x !== undefined &&
+    node.absoluteBoundingBox.y !== undefined &&
+    parent.x !== undefined &&
+    parent.y !== undefined
+  ) {
+    const x = round2(Number(node.absoluteBoundingBox.x) - Number(parent.x));
+    const y = round2(Number(node.absoluteBoundingBox.y) - Number(parent.y));
+    if (!Number.isNaN(x) && !Number.isNaN(y)) {
+      out.pos = { x, y };
+    }
+  }
+
   // Size { w, h } from absoluteBoundingBox (drops x and y canvas offsets)
   if (node.absoluteBoundingBox && typeof node.absoluteBoundingBox === 'object') {
     const { width, height } = node.absoluteBoundingBox;
@@ -82,7 +111,7 @@ export function trimNode(node) {
 
   // Recurse into children
   if (Array.isArray(node.children)) {
-    out.children = node.children.map(trimNode);
+    out.children = node.children.map((child) => trimNode(child, node.absoluteBoundingBox));
   }
 
   return out;

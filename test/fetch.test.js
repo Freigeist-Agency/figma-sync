@@ -463,3 +463,99 @@ test('an open PR with hand edits stops the run before any render call, with a co
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
+
+test('a one-frame section requests only the desktop render', async () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'figma-sync-fetch-1f-'));
+  fs.mkdirSync(path.join(tmpDir, '.git', 'info'), { recursive: true });
+  fs.mkdirSync(path.join(tmpDir, '.figma-sync'), { recursive: true });
+
+  const map = {
+    fileKey: 'key123',
+    tokens: 'tokens.css',
+    assets: 'assets',
+    protected: ['js/**'],
+    sections: [
+      {
+        name: 'header',
+        frames: ['1:1'],
+        files: ['index.html'],
+        selector: 'header',
+        page: 'index.html'
+      }
+    ]
+  };
+  fs.writeFileSync(path.join(tmpDir, '.figma-sync', 'map.json'), JSON.stringify(map, null, 2));
+
+  const nodesResponse = {
+    nodes: {
+      '1:1': {
+        document: {
+          id: '1:1',
+          name: 'header-desktop',
+          type: 'FRAME',
+          devStatus: { type: 'READY_FOR_DEV' }
+        }
+      }
+    }
+  };
+
+  let requestedRenderIds = null;
+  const downloads = [];
+
+  const fakeFigma = {
+    async getNodes(fileKey, ids) {
+      return nodesResponse;
+    },
+    async getRenders(fileKey, ids) {
+      requestedRenderIds = ids;
+      return {
+        images: {
+          '1:1': 'https://s3.example.com/header-desktop.png',
+          undefined: 'https://s3.example.com/bogus-mobile.png'
+        }
+      };
+    },
+    async getImageFills() {
+      return { meta: { images: {} } };
+    },
+    async download(url, dest) {
+      downloads.push({ url, dest });
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      fs.writeFileSync(dest, 'desktop-image-data');
+      return dest;
+    },
+    async comment() {}
+  };
+
+  const fakeGh = {
+    async defaultBranch() { return 'main'; },
+    async branchHead() { return 'sha-1'; },
+    async openSyncPr() { return null; },
+    async fileAt() { return null; },
+    async compareCommits() { return []; }
+  };
+
+  try {
+    const res = await runFetch({
+      repoDir: tmpDir,
+      map,
+      figma: fakeFigma,
+      gh: fakeGh,
+      eventNodeId: '1:1',
+      changeMessage: 'Desktop only header',
+      force: false
+    });
+
+    assert.deepStrictEqual(res.due, ['header']);
+    assert.deepStrictEqual(requestedRenderIds, ['1:1']);
+    assert.strictEqual(downloads.length, 1);
+    assert.strictEqual(downloads[0].url, 'https://s3.example.com/header-desktop.png');
+
+    const headerDir = path.join(tmpDir, '.figma-sync', 'work', 'header');
+    assert(fs.existsSync(path.join(headerDir, 'tree.json')));
+    assert(fs.existsSync(path.join(headerDir, 'desktop.png')));
+    assert.strictEqual(fs.existsSync(path.join(headerDir, 'mobile.png')), false);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});

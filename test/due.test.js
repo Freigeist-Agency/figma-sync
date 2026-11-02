@@ -146,3 +146,58 @@ test('a null node makes the section missing, not due', () => {
   // Other sections (footer) are still decided
   assert(result.due.some((s) => s.name === 'footer'));
 });
+
+test('a one-frame section is due when its frame is ready', () => {
+  const map = {
+    sections: [
+      {
+        name: 'header',
+        frames: ['1:1']
+      }
+    ]
+  };
+  const nodesResponse = {
+    nodes: {
+      '1:1': {
+        document: {
+          id: '1:1',
+          name: 'header-desktop',
+          type: 'FRAME',
+          devStatus: { type: 'READY_FOR_DEV' }
+        }
+      }
+    }
+  };
+
+  const result = decide(map, nodesResponse, {});
+  assert.strictEqual(result.due.length, 1);
+  assert.strictEqual(result.due[0].name, 'header');
+  assert.strictEqual(result.notReady.includes('header'), false);
+});
+
+test('a one-frame section is not ready when its frame is not', () => {
+  const map = {
+    sections: [
+      {
+        name: 'header',
+        frames: ['1:1']
+      }
+    ]
+  };
+  const nodesResponse = {
+    nodes: {
+      '1:1': {
+        document: {
+          id: '1:1',
+          name: 'header-desktop',
+          type: 'FRAME',
+          devStatus: { type: 'NONE' }
+        }
+      }
+    }
+  };
+
+  const result = decide(map, nodesResponse, {});
+  assert.strictEqual(result.due.length, 0);
+  assert.deepStrictEqual(result.notReady, ['header']);
+});

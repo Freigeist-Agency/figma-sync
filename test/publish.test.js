@@ -357,3 +357,33 @@ test('prepare-publish --dry-run pushes nothing', async () => {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+test('a desktop-only section shows no mobile frame link', () => {
+  const body = prBody({
+    changeMessage: 'Updated header',
+    sections: [
+      {
+        name: 'header',
+        frames: ['1:1'],
+        selector: 'header',
+        page: 'index.html'
+      }
+    ],
+    fileKey: 'HFuZZUOKyUWmXb8yER287l',
+    shots: [
+      { section: 'header', width: 1440, file: 'header-1440.png', figma: 'desktop' },
+      { section: 'header', width: 375, file: 'header-375.png' }
+    ],
+    reviewBase: 'https://raw.githubusercontent.com/org/repo/figma-sync-review/runs/12345',
+    reports: {},
+    guardOk: true,
+    checks: { ok: true, problems: [] }
+  });
+
+  // Desktop link is present
+  assert(body.includes('https://www.figma.com/design/HFuZZUOKyUWmXb8yER287l/?node-id=1-1'));
+  // Mobile cell has none (desktop only)
+  assert(body.includes('| Mobile (375px) | none (desktop only) |'));
+  // 375 screenshot is still embedded
+  assert(body.includes('https://raw.githubusercontent.com/org/repo/figma-sync-review/runs/12345/header-375.png'));
+});

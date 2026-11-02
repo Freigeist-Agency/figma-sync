@@ -79,13 +79,10 @@ export function loadMap(repoDir) {
 
     if (
       !Array.isArray(section.frames) ||
-      section.frames.length !== 2 ||
-      typeof section.frames[0] !== 'string' ||
-      typeof section.frames[1] !== 'string' ||
-      !section.frames[0] ||
-      !section.frames[1]
+      (section.frames.length !== 1 && section.frames.length !== 2) ||
+      section.frames.some((f) => typeof f !== 'string' || !f)
     ) {
-      throw new Error(`Section "${section.name}" frames must contain exactly 2 frame IDs`);
+      throw new Error(`Section "${section.name}" frames must contain 1 or 2 frame IDs`);
     }
 
     for (const frameId of section.frames) {
