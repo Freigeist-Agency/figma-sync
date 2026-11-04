@@ -1,0 +1,56 @@
+name: closed
+
+on:
+  workflow_call:
+    inputs:
+      engine_ref:
+        type: string
+        default: v1
+        required: false
+    secrets:
+      FIGMA_TOKEN:
+        required: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  closed:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout site
+        uses: actions/checkout@v4
+
+      - name: Exclude internal paths
+        run: |
+          mkdir -p .git/info
+          echo '.figma-sync/work/' >> .git/info/exclude
+          echo '.figma-sync-engine/' >> .git/info/exclude
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Checkout engine
+        uses: actions/checkout@v4
+        with:
+          repository: Freigeist-Agency/figma-sync
+          ref: ${{ inputs.engine_ref }}
+          path: .figma-sync-engine
+
+      - name: Install engine dependencies
+        run: npm ci --prefix .figma-sync-engine
+
+      - name: Handle PR closed
+        env:
+          FIGMA_TOKEN: ${{ secrets.FIGMA_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN || github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          node .figma-sync-engine/bin/figma-sync.js closed \
+            --pr "${{ github.event.pull_request.number }}" \
+            --merged "${{ github.event.pull_request.merged }}" \
+            --base-sha "${{ github.event.pull_request.base.sha }}" \
+            --head-sha "${{ github.event.pull_request.head.sha }}"

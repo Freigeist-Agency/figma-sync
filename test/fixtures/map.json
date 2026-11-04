@@ -1,0 +1,43 @@
+{
+  "fileKey": "HFuZZUOKyUWmXb8yER287l",
+  "tokens": "css/tokens.css",
+  "assets": "assets",
+  "protected": [
+    "js/**",
+    "css/loader.css",
+    "css/orbit.css",
+    "css/carousel.css",
+    "css/menu.css",
+    "tests/**"
+  ],
+  "sections": [
+    {
+      "name": "nav",
+      "frames": ["1:1", "1:2"],
+      "files": [
+        "index.html",
+        "impressum.html",
+        "datenschutz.html",
+        "404.html",
+        "locations/*.html",
+        "css/site.css"
+      ],
+      "selector": "header.site-header",
+      "page": "index.html"
+    },
+    {
+      "name": "footer",
+      "frames": ["1:3", "1:4"],
+      "files": [
+        "index.html",
+        "impressum.html",
+        "datenschutz.html",
+        "404.html",
+        "locations/*.html",
+        "css/site.css"
+      ],
+      "selector": "footer.site-footer",
+      "page": "index.html"
+    }
+  ]
+}
